@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { conversions, documents } from "@/lib/db/schema";
-import { desc, eq, sql } from "drizzle-orm";
+import { desc, eq, sql, ilike } from "drizzle-orm";
 import { auth } from "@/lib/auth/config";
 import crypto from "crypto";
 
@@ -9,34 +9,89 @@ function hashIp(ip: string): string {
   return crypto.createHash("sha256").update(ip).digest("hex");
 }
 
-// POST: 변환 로그 기록 (공개)
+// POST: 변환 로그 기록 + 문서 자동 등록 (공개)
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { filename, sizeBytes, layoutType, documentId } = body;
+    const contentType = req.headers.get("content-type") || "";
+    let filename = "unknown.html";
+    let sizeBytes = 0;
+    let layoutType = "unknown";
+    let htmlContent: string | null = null;
 
-    if (!filename || !layoutType) {
-      return NextResponse.json({ error: "Missing fields" }, { status: 400 });
+    if (contentType.includes("multipart/form-data")) {
+      // FormData (파일 포함)
+      const formData = await req.formData();
+      filename = (formData.get("filename") as string) || "unknown.html";
+      sizeBytes = parseInt((formData.get("sizeBytes") as string) || "0");
+      layoutType = (formData.get("layoutType") as string) || "unknown";
+      const file = formData.get("file") as File | null;
+      if (file) {
+        htmlContent = await file.text();
+        sizeBytes = file.size;
+        filename = file.name;
+      }
+    } else {
+      // JSON (이전 호환)
+      const body = await req.json();
+      filename = body.filename || "unknown.html";
+      sizeBytes = body.sizeBytes || 0;
+      layoutType = body.layoutType || "unknown";
     }
 
     const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
     const ipHash = hashIp(ip);
 
-    await db.insert(conversions).values({
-      filename,
-      sizeBytes: sizeBytes || 0,
-      layoutType,
-      documentId: documentId || null,
-      ipHash,
+    let documentId: number | null = null;
+
+    // 같은 파일명의 문서가 이미 있는지 확인
+    const existing = await db.query.documents.findFirst({
+      where: ilike(documents.filename, filename),
     });
 
-    // 문서가 있으면 변환 횟수 증가
-    if (documentId) {
+    if (existing) {
+      // 기존 문서의 변환 횟수 증가
+      documentId = existing.id;
       await db
         .update(documents)
         .set({ conversionCount: sql`${documents.conversionCount} + 1` })
-        .where(eq(documents.id, documentId));
+        .where(eq(documents.id, existing.id));
+    } else if (htmlContent) {
+      // 새 문서 등록 (Vercel Blob 업로드 시도)
+      let blobUrl = "";
+      try {
+        const { put } = await import("@vercel/blob");
+        const blob = await put(
+          `documents/${Date.now()}-${filename}`,
+          new Blob([htmlContent], { type: "text/html" }),
+          { access: "public" }
+        );
+        blobUrl = blob.url;
+      } catch {
+        // Blob 토큰 없으면 URL 없이 저장
+        blobUrl = "";
+      }
+
+      const [doc] = await db
+        .insert(documents)
+        .values({
+          filename,
+          sizeBytes,
+          layoutType,
+          blobUrl,
+          conversionCount: 1,
+        })
+        .returning();
+      documentId = doc.id;
     }
+
+    // 변환 로그 기록
+    await db.insert(conversions).values({
+      filename,
+      sizeBytes,
+      layoutType,
+      documentId,
+      ipHash,
+    });
 
     return NextResponse.json({ success: true });
   } catch (error) {

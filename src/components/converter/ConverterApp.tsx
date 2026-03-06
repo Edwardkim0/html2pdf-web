@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Image from "next/image";
+import Link from "next/link";
 import { detectLayout, type LayoutInfo } from "@/lib/converter/detectLayout";
 import { executePrint } from "@/lib/converter/printHandler";
 import DropZone from "./DropZone";
@@ -47,16 +49,19 @@ export default function ConverterApp() {
     executePrint(htmlContent, layoutInfo?.type ?? "unknown");
     setPhase("converted");
 
-    // Fire-and-forget: log the conversion
+    // Fire-and-forget: log the conversion + 파일 업로드
     try {
+      const formData = new FormData();
+      if (file) {
+        formData.append("file", file);
+      }
+      formData.append("filename", file?.name ?? "unknown.html");
+      formData.append("sizeBytes", String(file?.size ?? 0));
+      formData.append("layoutType", layoutInfo?.type ?? "unknown");
+
       fetch("/api/conversions", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          filename: file?.name ?? "unknown.html",
-          sizeBytes: file?.size ?? 0,
-          layoutType: layoutInfo?.type ?? "unknown",
-        }),
+        body: formData,
       }).catch(() => {
         // Silently ignore tracking errors
       });
@@ -75,11 +80,29 @@ export default function ConverterApp() {
 
   return (
     <div className="converter-root">
+      {/* Top Bar: Logo + Admin */}
+      <div className="top-bar">
+        <Image
+          src="/logo-dfinite.png"
+          alt="Dfinite"
+          width={120}
+          height={32}
+          className="logo"
+          priority
+        />
+        <Link href="/admin/login" className="btn-admin">
+          <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          관리자
+        </Link>
+      </div>
+
       <div className="app">
         {/* Header */}
         <div className="header">
           <h1>HTML → PDF 변환기</h1>
-          <p>HTML 파일을 브라우저 인쇄 기능으로 PDF로 변환합니다</p>
+          <p>HTML 파일을 업로드하면 레이아웃을 자동 감지하여<br/>최적의 PDF로 변환합니다</p>
         </div>
 
         {/* Phase: idle — show drop zone */}
@@ -117,6 +140,11 @@ export default function ConverterApp() {
             </button>
           </>
         )}
+      </div>
+
+      {/* Footer */}
+      <div className="footer">
+        © {new Date().getFullYear()} Dfinite. All rights reserved.
       </div>
     </div>
   );
