@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import { detectLayout } from "@/lib/converter/detectLayout";
+import { executePrint } from "@/lib/converter/printHandler";
 
 interface Document {
   id: number;
@@ -52,6 +54,7 @@ export default function AdminDocumentsPage() {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [converting, setConverting] = useState<number | null>(null);
 
   const fetchDocuments = useCallback(async () => {
     setLoading(true);
@@ -98,6 +101,34 @@ export default function AdminDocumentsPage() {
       alert("삭제에 실패했습니다.");
     } finally {
       setDeleting(null);
+    }
+  };
+
+  // HTML 파일 다운로드
+  const handleDownloadHtml = (doc: Document) => {
+    const link = document.createElement("a");
+    link.href = `/api/documents/${doc.id}/download`;
+    link.download = doc.filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // PDF 변환 (브라우저 인쇄)
+  const handleConvertPdf = async (doc: Document) => {
+    setConverting(doc.id);
+    try {
+      const res = await fetch(`/api/documents/${doc.id}/download?format=content`);
+      if (!res.ok) throw new Error("Failed to fetch content");
+      const { content, layoutType } = await res.json();
+
+      // 변환 로직 실행 (브라우저 인쇄 대화상자)
+      const layout = detectLayout(content);
+      executePrint(content, layout.type);
+    } catch {
+      alert("PDF 변환에 실패했습니다.");
+    } finally {
+      setConverting(null);
     }
   };
 
@@ -249,47 +280,41 @@ export default function AdminDocumentsPage() {
                         {formatDate(doc.uploadedAt)}
                       </td>
                       <td className="px-6 py-3.5">
-                        <div className="flex items-center gap-2">
-                          <a
-                            href={doc.blobUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors"
+                        <div className="flex items-center gap-1.5">
+                          {/* HTML 다운로드 */}
+                          <button
+                            onClick={() => handleDownloadHtml(doc)}
+                            title="HTML 다운로드"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-gray-600 border border-gray-200 rounded-md hover:bg-gray-50 transition-colors cursor-pointer"
                           >
-                            <svg
-                              className="w-3.5 h-3.5"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
-                              />
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                             </svg>
-                            다운로드
-                          </a>
+                            HTML
+                          </button>
+                          {/* PDF 변환 */}
+                          <button
+                            onClick={() => handleConvertPdf(doc)}
+                            disabled={converting === doc.id}
+                            title="PDF로 변환"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-orange-600 border border-orange-200 rounded-md hover:bg-orange-50 transition-colors disabled:opacity-50 cursor-pointer"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                            </svg>
+                            {converting === doc.id ? "변환중..." : "PDF"}
+                          </button>
+                          {/* 삭제 */}
                           <button
                             onClick={() => handleDelete(doc)}
                             disabled={deleting === doc.id}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50 cursor-pointer"
+                            title="삭제"
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-red-600 border border-red-200 rounded-md hover:bg-red-50 transition-colors disabled:opacity-50 cursor-pointer"
                           >
-                            <svg
-                              className="w-3.5 h-3.5"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
-                              />
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
                             </svg>
-                            {deleting === doc.id ? "삭제 중..." : "삭제"}
+                            {deleting === doc.id ? "삭제중..." : "삭제"}
                           </button>
                         </div>
                       </td>
